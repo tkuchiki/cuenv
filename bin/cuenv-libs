@@ -1,0 +1,109 @@
+#!/bin/bash
+
+CUENV_BIN_DIR="${CUENV_ROOT}/bin"
+CUENV_CURRENT_CUE="${CUENV_ROOT}/versions/${CUENV_CUE_VERSION}"
+
+CUENV_VERSIONS="${CUENV_ROOT}/versions"
+CUENV_SELECTED_DIR="${CUENV_ROOT}/current"
+CUENV_SELECTED_VERSION="${CUENV_SELECTED_DIR}/version"
+CUENV_SELECTED_BIN_DIR="${CUENV_SELECTED_DIR}/bin"
+CUENV_SELECTED_CUE="${CUENV_SELECTED_BIN_DIR}/cue"
+
+# Remove leading 'v' from version string
+function normalize_version() {
+  local version="${1}"
+  echo "${version#v}"
+}
+
+function get_arch() {
+  local arch="$(uname -m)"
+  case "${arch}" in
+    "x86_64")
+      echo "amd64"
+      ;;
+    "arm64"|"aarch64")
+      echo "arm64"
+      ;;
+    *)
+      echo "Unsupported architecture: ${arch}" >&2
+      return 1
+      ;;
+  esac
+}
+
+function use_version() {
+  local version="$(normalize_version "${1}")"
+  if [ -z "${version}" ]; then
+    local versions=($(ls -1 "${CUENV_VERSIONS}" 2>/dev/null))
+    if [ ${#versions[@]} -eq 0 ]; then
+      echo "No versions installed" >&2
+      return 1
+    fi
+
+    echo "Available versions:"
+    for i in "${!versions[@]}"; do
+      echo "$((i+1))) ${versions[$i]}"
+    done
+
+    read -p "Which version? " choice
+    version="${versions[$((choice-1))]}"
+  fi
+
+  if [ ! -d "${CUENV_VERSIONS}/${version}" ]; then
+    echo "Version ${version} is not installed" >&2
+    return 1
+  fi
+
+  export CUENV_CUE_VERSION="${version}"
+
+  if [ ! -d "${CUENV_SELECTED_BIN_DIR}" ]; then
+    mkdir -p "${CUENV_SELECTED_BIN_DIR}"
+  fi
+
+  rm -f "${CUENV_SELECTED_CUE}"
+  ln -s "${CUENV_VERSIONS}/${version}/cue" "${CUENV_SELECTED_CUE}"
+  echo "${version}" > "${CUENV_SELECTED_VERSION}"
+
+  if [ "${CUENV_QUIET}" != "true" ]; then
+    echo "${version} selected"
+  fi
+  return 0
+}
+
+function read_cue_version() {
+  local version_file=".cue-version"
+  local version_file_not_found="true"
+  local repo_root=""
+  local version=""
+
+  # Check .cue-version in current directory
+  if [ -f "${version_file}" ]; then
+    version=$(cat "${version_file}")
+    if [ -n "${version}" ]; then
+      version_file_not_found="false"
+      export CUENV_CUE_VERSION="$(normalize_version "${version}")"
+      return 0
+    fi
+  fi
+
+  # Find Git repository root directory
+  repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
+  if [ -n "${repo_root}" ] && [ -f "${repo_root}/${version_file}" ]; then
+    version=$(cat "${repo_root}/${version_file}")
+    if [ -n "${version}" ]; then
+      version_file_not_found="false"
+      export CUENV_CUE_VERSION="$(normalize_version "${version}")"
+      return 0
+    fi
+  fi
+
+  if [ "${version_file_not_found}" = "true" ]; then
+    unset CUENV_CUE_VERSION
+
+    if [ -f "${CUENV_CURRENT_VERSION}" ]; then
+      export CUENV_CUE_VERSION="$(cat "${CUENV_CURRENT_VERSION}")"
+    fi
+  fi
+
+  return 0
+} 

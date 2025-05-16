@@ -1,0 +1,146 @@
+#!/bin/bash
+
+set -e
+
+if [ "${CUENV_DEBUG}" = "true" ]; then
+  set -x
+fi
+
+VERSION="0.1.0"
+CUENV_ROOT="${HOME}/.cuenv"
+CUENV_BIN_DIR="${CUENV_ROOT}/bin"
+
+source "${CUENV_BIN_DIR}/cuenv-libs"
+
+function show_help() {
+  cat << EOF
+Usage: cuenv
+
+cuenv is a CUE version manager
+
+Commands:
+  install   Install CUE
+  path      Show current CUE's abs path
+  update    Update cuenv
+  use       Set version
+  versions  Show installed CUE versions
+  version   Show current version of CUE
+
+Options:
+  --version Show version of cuenv
+EOF
+}
+
+function show_version() {
+  echo "cuenv version ${VERSION}"
+}
+
+function get_arch() {
+  local arch="$(uname -m)"
+  case "${arch}" in
+    "x86_64")
+      echo "amd64"
+      ;;
+    "arm64"|"aarch64")
+      echo "arm64"
+      ;;
+    *)
+      echo "Unsupported architecture: ${arch}" >&2
+      exit 1
+      ;;
+  esac
+}
+
+function install_cue() {
+  local version="$(normalize_version "${1}")"
+  local use="${2}"
+  local os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  local arch="$(get_arch)"
+  local download_url="https://github.com/cue-lang/cue/releases/download/v${version}/cue_v${version}_${os}_${arch}.tar.gz"
+  
+  local temp_dir=$(mktemp -d)
+
+  echo "Downloading CUE v${version}..."
+  curl -L "${download_url}" -o "${temp_dir}/cue.tar.gz"
+  tar xzf "${temp_dir}/cue.tar.gz" -C "${temp_dir}"
+
+  mkdir -p "${CUENV_VERSIONS}/${version}"
+  mv "${temp_dir}/cue" "${CUENV_VERSIONS}/${version}/"
+
+  rm -rf "${temp_dir}"
+
+  echo "${version} is installed"
+
+  if [ "${use}" = "true" ]; then
+    use_version "${version}"
+  fi
+}
+
+function show_path() {
+  if [ -L "${CUENV_CURRENT}" ]; then
+    echo "$(readlink "${CUENV_CURRENT}")/cue"
+  else
+    echo "No version selected"
+    exit 1
+  fi
+}
+
+function show_versions() {
+  if [ -d "${CUENV_VERSIONS}" ]; then
+    ls -1 "${CUENV_VERSIONS}"
+  else
+    echo "No versions installed"
+  fi
+}
+
+function show_current_version() {
+  if [ -n "${CUENV_CUE_VERSION}" ]; then
+    echo "${CUENV_CUE_VERSION}"
+  elif [ -f "${CUENV_SELECTED_VERSION}" ]; then
+    cat "${CUENV_SELECTED_VERSION}"
+  else
+    echo "No version selected"
+    exit 1
+  fi
+}
+
+function update_cuenv() {
+  local current_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  git -C "${current_dir}" pull
+  echo "Updated"
+}
+
+# Create necessary directories
+mkdir -p "${CUENV_VERSIONS}"
+
+case "${1}" in
+  install)
+    if [ -z "${2}" ]; then
+      echo "Usage: cuenv install VERSION [--use]"
+      exit 1
+    fi
+    install_cue "${2}" "$([ "${3}" = "--use" ] && echo "true" || echo "false")"
+    ;;
+  use)
+    use_version "${2}"
+    ;;
+  path)
+    show_path
+    ;;
+  version)
+    read_cue_version
+    show_current_version
+    ;;
+  versions)
+    show_versions
+    ;;
+  update)
+    update_cuenv
+    ;;
+  --version)
+    show_version
+    ;;
+  *)
+    show_help
+    ;;
+esac 
